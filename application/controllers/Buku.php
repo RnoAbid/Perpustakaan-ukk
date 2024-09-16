@@ -6,23 +6,21 @@ class Buku extends CI_Controller
     public function __construct()
     {
         parent::__construct();
-        $this->load->database();
+        $this->load->model('Buku_model');
+        $this->load->library('session');
+        $this->load->helper('url');
+
         if ($this->session->userdata('level') == NULL || $this->session->userdata('level') == 'peminjam') {
             redirect('auth');
         }
     }
+
     public function index()
     {
-        $this->db->from('buku a')->join('kategoribuku b', 'a.id_kategori=b.id_kategori', 'left');
-        $buku = $this->db->get()->result_array();
-        $this->db->from('kategoribuku');
-        $kategori = $this->db->get()->result_array();
-        $this->db->select('id_buku, AVG(rating) as avg_rating');
-        $this->db->from('ulasan');
-        $this->db->group_by('id_buku');
-        $ulasan = $this->db->get()->result_array();
+        $buku = $this->Buku_model->get_all_buku();
+        $kategori = $this->Buku_model->get_all_kategori();
+        $ulasan = $this->Buku_model->get_avg_ratings();
 
-        // Buat array asosiasi untuk rata-rata rating per id_buku
         $avg_ratings = [];
         foreach ($ulasan as $row) {
             $avg_ratings[$row['id_buku']] = $row['avg_rating'];
@@ -31,28 +29,30 @@ class Buku extends CI_Controller
         $data = array(
             'kategori' => $kategori,
             'judul_halaman' => 'Halaman Depan',
-            'buku'  => $buku,
+            'buku' => $buku,
             'avg_ratings' => $avg_ratings,
         );
+
         $this->template->load('template', 'buku', $data);
     }
 
     public function ulasan($id)
     {
-        $buku = $this->db->from('buku')->where('id_buku', $id)->get()->row();
-        $this->db->from('ulasan a')->join('user b', 'a.id_user=b.id_user')->where('id_buku', $id);
-        $ulasan = $this->db->get()->result_array();
+        $buku = $this->Buku_model->get_buku_by_id($id);
+        $ulasan = $this->Buku_model->get_ulasan_by_buku($id);
+
         $data = array(
             'buku' => $buku,
             'ulasan' => $ulasan,
             'judul_halaman' => 'Halaman Ulasan dari User'
         );
+
         $this->template->load('template', 'ulasan_admin', $data);
     }
 
     public function tambah()
     {
-        $config['upload_path'] = 'assets/upload/buku/';
+        $config['upload_path'] = './assets/upload/buku/';
         $config['allowed_types'] = 'jpg|jpeg|png';
         $config['max_size'] = 500; // Kilobytes
         $config['file_name'] = date('YmdHis') . '.jpg';
@@ -60,11 +60,7 @@ class Buku extends CI_Controller
         $this->load->library('upload', $config);
 
         if (!$this->upload->do_upload('foto')) {
-            $this->session->set_flashdata('alert', '
-            <div class="alert alert-danger" role="alert">
-            ' . $this->upload->display_errors() . '
-            </div>
-        ');
+            $this->session->set_flashdata('alert', '<div class="alert alert-danger" role="alert">' . $this->upload->display_errors() . '</div>');
             redirect('buku');
         } else {
             $upload_data = $this->upload->data();
@@ -78,88 +74,53 @@ class Buku extends CI_Controller
             'tahunterbit' => $this->input->post('tahunterbit'),
             'deskripsi' => $this->input->post('deskripsi'),
             'foto' => $foto,
-            'stok'           => $this->input->post('stok'),
+            'stok' => $this->input->post('stok'),
             'id_kategori' => $this->input->post('id_kategori')
         );
 
-        $this->db->insert('buku', $data);
-        $this->session->set_flashdata('alert', '
-        <div class="alert alert-success" role="alert">
-        Data Berhasil Ditambahkan.
-        </div>
-    ');
+        $this->Buku_model->insert_buku($data);
+        $this->session->set_flashdata('alert', '<div class="alert alert-success" role="alert">Data Berhasil Ditambahkan.</div>');
         redirect('buku');
     }
-
-
 
     public function hapus($id)
     {
-        $where = array(
-            'id_buku' => $id // Ganti 'id_kategori' menjadi 'id_buku'
-        );
-        $this->db->delete('buku', $where); // Hapus dari tabel buku, bukan kategoribuku
-        $this->session->set_flashdata('alert', '
-        <div class="alert alert-success" role="alert">
-        Berhasil Menghapus Data.
-        </div>
-        ');
-        redirect('buku'); // Redirect ke 'buku', bukan 'kategori'
+        $this->Buku_model->delete_buku($id);
+        $this->session->set_flashdata('alert', '<div class="alert alert-success" role="alert">Berhasil Menghapus Data.</div>');
+        redirect('buku');
     }
 
     public function edit()
-    {
-        $judul = $this->input->post('judul');
-        $penulis = $this->input->post('penulis');
-        $penerbit = $this->input->post('penerbit');
-        $tahunterbit = $this->input->post('tahunterbit');
-        $deskripsi = $this->input->post('deskripsi');
-        $stok = $this->input->post('stok');
-        $id_kategori = $this->input->post('id_kategori');
-        $foto_lama = $this->input->post('foto_lama');  // Pastikan foto_lama diterima
+{
+    $id_buku = $this->input->post('id_buku');
+    $judul = $this->input->post('judul');
+    $penulis = $this->input->post('penulis');
+    $penerbit = $this->input->post('penerbit');
+    $tahunterbit = $this->input->post('tahunterbit');
+    $deskripsi = $this->input->post('deskripsi');
+    $stok = $this->input->post('stok');
+    $id_kategori = $this->input->post('id_kategori');
+    $foto_lama = $this->input->post('foto_lama');
 
-        $foto = $_FILES['foto']['name'];
-        if ($foto) {
-            $config['upload_path'] = './assets/upload/buku';
-            $config['allowed_types'] = 'jpg|png|jpeg';
+    $data = array(
+        'judul' => $judul,
+        'penulis' => $penulis,
+        'penerbit' => $penerbit,
+        'tahunterbit' => $tahunterbit,
+        'deskripsi' => $deskripsi,
+        'stok' => $stok,
+        'id_kategori' => $id_kategori
+    );
 
-            $this->load->library('upload', $config);
-            if ($this->upload->do_upload('foto')) {
-                $foto_baru = $this->upload->data('file_name');
-                if (file_exists(FCPATH . 'assets/upload/buku/' . $foto_lama)) {
-                    unlink(FCPATH . 'assets/upload/buku/' . $foto_lama);
-                }
-            } else {
-                echo "Upload Gagal";
-                die();
-            }
-        } else {
-            $foto_baru = $foto_lama;  // Gunakan foto lama jika tidak ada foto baru
-        }
+    $result = $this->Buku_model->update_buku($id_buku, $data, $foto_lama);
 
-        $data = array(
-            'judul' => $judul,
-            'penulis' => $penulis,
-            'penerbit' => $penerbit,
-            'tahunterbit' => $tahunterbit,
-            'deskripsi' => $deskripsi,
-            'foto' =>  $foto_baru,  // Pastikan foto yang digunakan benar
-            'stok' => $stok,
-            'id_kategori' => $id_kategori
-        );
+    if ($result['status'] == 'error') {
+        $this->session->set_flashdata('alert', '<div class="alert alert-danger" role="alert">Upload Gagal: ' . $result['message'] . '</div>');
+    } else {
+        $this->session->set_flashdata('alert', '<div class="alert alert-success" role="alert">' . $result['message'] . '</div>');
+    }
 
-        $where = array(
-            'id_buku' => $this->input->post('id_buku')
-        );
+    redirect('buku');
 
-        $this->db->update('buku', $data, $where);
-
-        $this->session->set_flashdata('alert', '
-            <div class="alert alert-success" role="alert">
-            Berhasil Memperbarui Data
-            </div>
-        ');
-
-        redirect('buku');
     }
 }
